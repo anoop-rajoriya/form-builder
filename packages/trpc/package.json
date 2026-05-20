@@ -12,6 +12,8 @@
     "@repo/services": "workspace:*",
     "@trpc/client": "^11.8.1",
     "@trpc/server": "^11.8.1",
+    "@types/express": "^5.0.6",
+    "express": "^5.2.1",
     "trpc-to-openapi": "^3.1.0",
     "zod": "^4.3.5"
   }

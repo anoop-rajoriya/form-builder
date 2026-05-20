@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { email, z } from "zod";
 
 export const getAuthenticationMethodOutputSchema = z.object({
   provider: z.enum(["GOOGLE_OAUTH"]),
@@ -9,3 +9,33 @@ export const getAuthenticationMethodOutputSchema = z.object({
 export type GetAuthenticationMethodOutputSchema = z.infer<
   typeof getAuthenticationMethodOutputSchema
 >;
+
+export const createUserWithEmailPasswordInputSchema = z.object({
+  firstName: z.string().describe("user first name"),
+  lastName: z.string().describe("user last name").optional(),
+  email: z.email().describe("user email"),
+  password: z.string().describe("user password"),
+});
+
+export const createUserWithEmailPasswordOutputSchema = z.object({
+  id: z.string().describe("user id"),
+  email: z.email().describe("user email"),
+  firstName: z.string().describe("user first name"),
+  lastName: z.string().describe("user last name").optional(),
+  profilPicture: z.string().describe("user profile picture url").optional(),
+});
+
+export type CreateUserWithEmailPasswordInputSchema = z.infer<
+  typeof createUserWithEmailPasswordInputSchema
+>;
+export type CreateUserWithEmailPasswordOutputSchema = z.infer<
+  typeof createUserWithEmailPasswordOutputSchema
+>;
+
+export const generateTokenPaylod = z.object({
+  id: z.string().describe("user id"),
+  email: z.email().describe("user email"),
+  role: z.enum(["USER", "ADMIN"]).describe("user role"),
+});
+
+export type GenerateTokenPaylod = z.infer<typeof generateTokenPaylod>;
