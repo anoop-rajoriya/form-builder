@@ -11,8 +11,13 @@ import {
   CreateUserWithEmailPasswordInputSchema,
   CreateUserWithEmailPasswordOutputSchema,
   GetAuthenticationMethodOutputSchema,
-  GenerateTokenPaylod,
+  UserTokenPaylod,
+  AuthenticateUserWithEmailPasswordInputSchema,
+  AuthenticateUserWithEmailPasswordOutputSchema,
+  authenticateUserWithEmailPasswordInputSchema,
+  GetUserInfoOutputSchema,
 } from "./model";
+import { getSystemErrorMessage } from "node:util";
 
 class UserService {
   public async getAuthenticationMethods(): Promise<
@@ -41,16 +46,22 @@ class UserService {
 
       return user;
     } catch (error) {
-      throw error;
+      throw new Error(`user with email ${email} not found`);
+    }
+  }
+
+  private async getUserById(id: string) {
+    try {
+      const [user] = await db.select().from(usersTable).where(eq(usersTable.id, id)).limit(1);
+
+      return user;
+    } catch (error) {
+      throw new Error(`user not found`);
     }
   }
 
   private getToken(len = 12) {
     return crypto.randomBytes(len).toString("hex");
-  }
-
-  private generateToken(payload: GenerateTokenPaylod): string {
-    return jwt.sign(payload, env.JWT_SECRET, { expiresIn: "7d" });
   }
 
   private generateHash(payload: string, secret: string) {
@@ -60,59 +71,130 @@ class UserService {
       .digest("base64");
   }
 
+  private generateUserToken(payload: UserTokenPaylod): string {
+    return jwt.sign(payload, env.JWT_SECRET, { expiresIn: "7d" });
+  }
+
+  public verifyUserToken(token: string): UserTokenPaylod {
+    try {
+      const payload = jwt.verify(token, env.JWT_SECRET) as UserTokenPaylod;
+      return payload;
+    } catch (error) {
+      throw new Error("Invalid or expired token");
+    }
+  }
+
   public async createUserWithEmailPassword(
     payload: CreateUserWithEmailPasswordInputSchema,
   ): Promise<CreateUserWithEmailPasswordOutputSchema & { token: string }> {
-    const { data, success, error } =
-      await createUserWithEmailPasswordInputSchema.safeParseAsync(payload);
+    const { data, success } = await createUserWithEmailPasswordInputSchema.safeParseAsync(payload);
 
     if (!success) {
-      console.error(JSON.stringify(error));
       throw new Error("invalid request body");
     }
 
     const { firstName, lastName, email, password } = data;
 
     const existingUser = await this.getUserByEmail(email);
-    if (existingUser) throw new Error(`User with email ${email} already exist`);
+
+    if (existingUser) {
+      throw new Error(`User with email ${email} already exist`);
+    }
 
     const secret = this.getToken();
     const hashedPassword = this.generateHash(password, secret);
 
-    const [createdUser] = await db
-      .insert(usersTable)
-      .values({
-        firstName,
-        lastName,
-        email,
-        password: hashedPassword,
-        secret,
-      })
-      .returning({
-        id: usersTable.id,
-        email: usersTable.email,
-        firstName: usersTable.firstName,
-        lastName: usersTable.lastName,
-        profileImageUrl: usersTable.profileImageUrl,
-        role: usersTable.role,
+    try {
+      const [createdUser] = await db
+        .insert(usersTable)
+        .values({
+          firstName,
+          lastName,
+          email,
+          password: hashedPassword,
+          secret,
+        })
+        .returning({
+          id: usersTable.id,
+          email: usersTable.email,
+          role: usersTable.role,
+        });
+
+      if (!createdUser || !createdUser.role) throw new Error("User creation failed");
+
+      const token = this.generateUserToken({
+        id: createdUser.id,
+        email: createdUser.email,
+        role: createdUser.role,
       });
 
-    if (!createdUser || !createdUser.id || !createdUser.role)
-      throw new Error("User creation failed");
+      return {
+        id: createdUser.id,
+        email: createdUser.email,
+        token,
+      };
+    } catch (error) {
+      if (error instanceof Error) {
+        console.error(error.message);
+      } else {
+        console.error(`user creation failed`);
+      }
+      throw new Error("user registration failed");
+    }
+  }
 
-    const token = this.generateToken({
-      id: createdUser.id,
-      email: createdUser.email,
-      role: createdUser.role,
+  public async authenticateUserWithEmailPassword(
+    payload: AuthenticateUserWithEmailPasswordInputSchema,
+  ): Promise<AuthenticateUserWithEmailPasswordOutputSchema & { token: string }> {
+    const { success, data } =
+      await authenticateUserWithEmailPasswordInputSchema.safeParseAsync(payload);
+
+    if (!success) {
+      throw new Error("Invalid email or password");
+    }
+
+    const { email, password } = data;
+
+    const existingUser = await this.getUserByEmail(email);
+
+    if (!existingUser || !existingUser.secret || !existingUser.role) {
+      throw new Error("Invalid email or password");
+    }
+
+    const hashedPassword = this.generateHash(password, existingUser.secret);
+
+    if (existingUser.password !== hashedPassword) {
+      throw new Error("Invalid email or password");
+    }
+
+    const token = this.generateUserToken({
+      id: existingUser.id,
+      email: existingUser.email,
+      role: existingUser.role,
     });
 
     return {
-      id: createdUser.id,
-      email: createdUser.email,
-      firstName: createdUser.firstName,
-      lastName: createdUser.lastName || undefined,
-      profilPicture: createdUser.profileImageUrl || undefined,
+      id: existingUser.id,
+      email: existingUser.email,
       token,
+    };
+  }
+
+  public async getUserInfo(id: string): Promise<GetUserInfoOutputSchema> {
+    const user = await this.getUserById(id);
+
+    if (!user || !user.role) {
+      throw new Error("user not found");
+    }
+
+    return {
+      id: user.id,
+      firstName: user.firstName,
+      lastName: user.lastName || undefined,
+      email: user.email,
+      emailVerified: user.emailVerified,
+      role: user.role,
+      ProfileImage: user.profileImageUrl,
     };
   }
 }
